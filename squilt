@@ -75,6 +75,18 @@ for config in QUILT_CONFIGS:
     spec = MountSpec(src=config)
     mounts.append(spec)
 
+extra_mounts = os.environ.get("SQUILT_EXTRA_MOUNTS", "")
+
+for extra in extra_mounts.split(";"):
+    extra = extra.strip()
+    if not extra:
+        continue
+    spec = eval(extra)
+    if type(spec) != MountSpec:
+        eprint(f"expression {extra} in SQUILT_EXTRA_MOUNTS is not a MountSpec instance!", exit=2)
+
+    mounts.append(spec)
+
 # we need to create a temporary config file since mounts with
 # : (like found in OBS package names) don't work on the command line
 with tempfile.NamedTemporaryFile(mode='w') as tmpfile:
