@@ -1,127 +1,94 @@
-#!/bin/sh
+#!/usr/bin/python3
 
-QUILT_USER_CONFIG="$HOME/.quiltrc"
-QUILT_GLOBAL_CONFIG="/etc/quilt.quiltrc"
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
 
-if ! which nsjail 2>/dev/null; then
-  echo "you need nsjail (security/nsjail in OBS) for this wrapper to work"
-  exit 1
-fi
+if sys.version_info.major != 3 or sys.version_info.minor < 7:
+    print("this script needs at least Python 3.7 to work", file=sys.stderr)
+    sys.exit(1)
 
-mount_dir=$(pwd)
-if [ -L patches ]; then
-  # are we inside the already unpacked dir? If so mount the parent dir so we
-  # have access to the patches
-  mount_dir=$mount_dir/..
-fi
+
+from collections import namedtuple
+from pathlib import Path
+
+
+def eprint(*args, **kwargs):
+    kwargs['file'] = sys.stderr
+    ex = kwargs.pop('exit', None)
+    print(*args, **kwargs)
+
+    if ex is not None:
+        sys.exit(ex)
+
+
+MountSpec = namedtuple(
+    'MountSpec',
+    'src dst rw fstype, mandatory',
+    defaults=(None, None, False, None, True)
+)
+
+QUILT_CONFIGS = (
+    # per-user config
+    os.path.expanduser("~/.quiltrc"),
+    # system-wide config
+    "/etc/quilt.quiltrc"
+)
+
+nsjail = shutil.which("nsjail")
+
+if not nsjail:
+    eprint("you need 'nsjail' (security/nsjail in OBS) for this wrapper to work", exit=1)
+
+pkgroot = Path(os.getcwd())
+
+# are we inside the already unpacked dir? If so mount the parent dir so we
+# have access to the patches
+if (pkgroot / "patches").is_symlink():
+    pkgroot = pkgroot.parent
+
+mounts = [
+    MountSpec(src="/bin"),
+    MountSpec(src="/lib"),
+    MountSpec(src="/lib64"),
+    MountSpec(src="/usr"),
+    MountSpec(src="/sbin"),
+    MountSpec(src="/dev/null", rw=True),
+    MountSpec(src="/dev/urandom", rw=True),
+    MountSpec(src="/etc/alternatives", mandatory=False),
+    MountSpec(src="/etc/nsswitch.conf"),
+    MountSpec(src="/etc/ld.so.cache"),
+    MountSpec(src="/etc/rpm", mandatory=False),
+    MountSpec(dst="/tmp", fstype="tmpfs", rw=True),
+    MountSpec(dst="/var/tmp", fstype="tmpfs", rw=True),
+    MountSpec(dst="/var/tmp", fstype="tmpfs", rw=True),
+    MountSpec(src=pkgroot, rw=True),
+    MountSpec(dst=os.path.expanduser("~/rpmbuild"), fstype="tmpfs", rw=True),
+]
+
+for config in QUILT_CONFIGS:
+    if not Path(config).exists():
+        continue
+
+    spec = MountSpec(src=config)
+    mounts.append(spec)
 
 # we need to create a temporary config file since mounts with
-# : don't work on the command line
-TMPFILE=`mktemp -t squilt.nsjail.XXXXXXXXXX` || exit 1
-trap "rm -f -- '$TMPFILE'" EXIT
+# : (like found in OBS package names) don't work on the command line
+with tempfile.NamedTemporaryFile(mode='w') as tmpfile:
 
-cat <<END_CONFIG > $TMPFILE
+    tmpfile.write(
+        f"""
 name: "quilt secure sandbox"
-
 description: "This policy allows to run quilt in a secure way"
 
 time_limit: 120
 
-cwd: "$(pwd)"
-envar: "HOME=$HOME"
-envar: "PATH=$PATH"
-
-mount {
-        src: "/bin"
-        dst: "/bin"
-        rw: false
-        is_bind: true
-}
-mount {
-        src: "/lib"
-        dst: "/lib"
-        rw: false
-        is_bind: true
-}
-mount {
-        src: "/lib64"
-        dst: "/lib64"
-        rw: false
-        is_bind: true
-}
-mount {
-        src: "/usr"
-        dst: "/usr"
-        rw: false
-        is_bind: true
-}
-mount {
-        src: "/sbin"
-        dst: "/sbin"
-        rw: false
-        is_bind: true
-}
-mount {
-        src: "/dev/null"
-        dst: "/dev/null"
-        rw: true
-        is_bind: true
-}
-mount {
-        src: "/dev/urandom"
-        dst: "/dev/urandom"
-        rw: true
-        is_bind: true
-}
-mount {
-        src: "/etc/alternatives"
-        dst: "/etc/alternatives"
-        rw: false
-        is_bind: true
-        mandatory: false
-}
-mount {
-        src: "/etc/nsswitch.conf"
-        dst: "/etc/nsswitch.conf"
-        rw: false
-        is_bind: true
-}
-mount {
-        src: "/etc/ld.so.cache"
-        dst: "/etc/ld.so.cache"
-        rw: false
-        is_bind: true
-}
-mount {
-        src: "/etc/rpm"
-        dst: "/etc/rpm"
-        rw: false
-        is_bind: true
-}
-mount {
-        dst: "/tmp"
-        fstype: "tmpfs"
-        rw: true
-        is_bind: false
-}
-mount {
-        dst: "/var/tmp"
-        fstype: "tmpfs"
-        rw: true
-        is_bind: false
-}
-mount {
-        src: "$mount_dir"
-        dst: "$mount_dir"
-        rw: true
-        is_bind: true
-}
-mount {
-        dst: "$HOME/rpmbuild"
-        fstype: "tmpfs"
-        rw: true
-        is_bind: false
-}
+cwd: "{os.getcwd()}"
+envar: "HOME={os.environ["HOME"]}"
+envar: "PATH={os.environ["PATH"]}"
 
 rlimit_as_type: HARD
 rlimit_core_type: HARD
@@ -130,28 +97,42 @@ rlimit_fsize_type: HARD
 rlimit_nofile_type: HARD
 rlimit_nproc_type: HARD
 rlimit_stack_type: HARD
-END_CONFIG
 
-if [ -e "$QUILT_USER_CONFIG" ]; then
-  cat <<END_CONFIG >> $TMPFILE
-mount {
-        src: "$QUILT_USER_CONFIG"
-        dst: "$QUILT_USER_CONFIG"
-        rw: false
-        is_bind: true
-}
-END_CONFIG
-fi
+""")
 
-if [ -e "$QUILT_GLOBAL_CONFIG" ]; then
-  cat <<END_CONFIG >> $TMPFILE
-mount {
-        src: "$QUILT_GLOBAL_CONFIG"
-        dst: "$QUILT_GLOBAL_CONFIG"
-        rw: false
-        is_bind: true
-}
-END_CONFIG
-fi
+    for mnt in mounts:
+        if mnt.src is None and mnt.fstype is None:
+            eprint("Error in MountSpec ({str(mnt)}): neither src nor fstype", exit=1)
+        elif mnt.fstype is not None and not mnt.rw:
+            eprint("Error in MountSpec ({str(mnt)}): tmpfs w/o RW?", exit=1)
+        elif mnt.src and not mnt.mandatory and not Path(mnt.src).exists():
+            # check ourselves whether non-mandatory mounts exist to avoid ugly
+            # warnings being output by nsjail
+            continue
 
-nsjail -Mo -q --config $TMPFILE -- /usr/bin/quilt $@
+        tmpfile.write("mount {\n")
+        if mnt.src is not None:
+            tmpfile.write(f'\tsrc: "{mnt.src}"\n')
+
+        dst = mnt.dst if mnt.dst is not None else mnt.src
+        tmpfile.write(f'\tdst: "{dst}"\n')
+        rw = "true" if mnt.rw else "false"
+        tmpfile.write(f'\trw: {rw}\n')
+        is_bind = "true"
+        if mnt.src is None and mnt.fstype is not None:
+            is_bind = "false"
+        tmpfile.write(f'\tis_bind: {is_bind}\n')
+
+        if mnt.fstype:
+            tmpfile.write(f'\tfstype: "{mnt.fstype}"\n')
+
+        if not mnt.mandatory:
+            tmpfile.write('\tmandatory: false\n')
+        tmpfile.write('}\n')
+
+    tmpfile.flush()
+    nsjail_cmdline = [nsjail, "-Mo", "-q", "--config", tmpfile.name, "--"]
+    nsjail_cmdline.extend(["/usr/bin/quilt"] + sys.argv[1:])
+    res = subprocess.call(nsjail_cmdline, shell=False)
+
+sys.exit(res)

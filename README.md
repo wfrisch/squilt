@@ -13,3 +13,13 @@ was (at least to us) unexpected.
 If you add an alias quilt=squilt or copy this script as 'quilt' to a directory
 that is earlier in $PATH you should be able to use it like you use quilt without
 noticying a difference.
+
+# Protection Level
+
+squilt uses namespace isolation techniques to mark most of the hosts file
+systems as read-only and to make possibly sensitive data inacessible (like the
+user's home directory or most system configuration files). Write access is
+still necessary in the current working directory where squilt is invoked. This
+means a malicous RPM spec file could still manipulate the RPM package's
+directory contents. When working with untrusted spec files this should be
+obvious, however.
