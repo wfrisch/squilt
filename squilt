@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 
-if sys.version_info.major != 3 or sys.version_info.minor < 7:
+if sys.version_info.major != 3 or sys.version_info.minor < 6:
     print("this script needs at least Python 3.7 to work", file=sys.stderr)
     sys.exit(1)
 
@@ -26,9 +26,12 @@ def eprint(*args, **kwargs):
 
 MountSpec = namedtuple(
     'MountSpec',
-    'src dst rw fstype, mandatory',
-    defaults=(None, None, False, None, True)
+    'src dst rw fstype, mandatory'
 )
+
+# Python >= 3.7 support a 'defaults' kwargs in the Factory above, but I still
+# want to support 3.6 which is the default on openSUSE :(
+MountSpec.__new__.__defaults__ = (None, None, False, None, True)
 
 QUILT_CONFIGS = (
     # per-user config
