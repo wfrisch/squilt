@@ -55,8 +55,6 @@ mounts = [
     MountSpec(src="/lib64"),
     MountSpec(src="/usr"),
     MountSpec(src="/sbin"),
-    MountSpec(src="/dev/null", rw=True),
-    MountSpec(src="/dev/urandom", rw=True),
     MountSpec(src="/etc/alternatives", mandatory=False),
     MountSpec(src="/etc/nsswitch.conf"),
     MountSpec(src="/etc/ld.so.cache"),
@@ -76,6 +74,20 @@ for config in QUILT_CONFIGS:
     spec = MountSpec(src=config)
     mounts.append(spec)
 
+VERBOSE = "SQUILT_VERBOSE" in os.environ
+ENTER_SHELL = "SQUILT_ENTER_SHELL" in os.environ
+DEBUG = "SQUILT_DEBUG" in os.environ
+
+if ENTER_SHELL:
+    mounts.append(
+        MountSpec(src="/dev", rw=True)
+    )
+else:
+    mounts.extend([
+        MountSpec(src="/dev/null", rw=True),
+        MountSpec(src="/dev/urandom", rw=True),
+    ])
+
 extra_mounts = os.environ.get("SQUILT_EXTRA_MOUNTS", "")
 
 for extra in extra_mounts.split(";"):
@@ -88,30 +100,35 @@ for extra in extra_mounts.split(";"):
 
     mounts.append(spec)
 
+config_settings = [
+    ("name", '"quilt secure sandbox"'),
+    ("description", '"This policy allows to run quilt in a secure way"'),
+    ("cwd", f'"{os.getcwd()}"'),
+    ("envar", f'"HOME={os.environ["HOME"]}"'),
+    ("envar", f'"PATH={os.environ["PATH"]}"'),
+]
+
+for rlimit_class in ("as", "core", "cpu", "fsize", "nofile", "nproc", "stack"):
+    config_settings.append((f"rlimit_{rlimit_class}_type", "HARD"))
+
+if ENTER_SHELL:
+    config_settings.extend([
+        ("mount_proc", "true"),
+        # this option is security relevant, because programs in the jail can put
+        # back characters into our host environment's terminal
+        ("skip_setsid", "true")
+    ])
+else:
+    config_settings.append(
+        ("time_limit", "120")
+    )
+
 # we need to create a temporary config file since mounts with
 # : (like found in OBS package names) don't work on the command line
 with tempfile.NamedTemporaryFile(mode='w') as tmpfile:
 
-    tmpfile.write(
-        f"""
-name: "quilt secure sandbox"
-description: "This policy allows to run quilt in a secure way"
-
-time_limit: 120
-
-cwd: "{os.getcwd()}"
-envar: "HOME={os.environ["HOME"]}"
-envar: "PATH={os.environ["PATH"]}"
-
-rlimit_as_type: HARD
-rlimit_core_type: HARD
-rlimit_cpu_type: HARD
-rlimit_fsize_type: HARD
-rlimit_nofile_type: HARD
-rlimit_nproc_type: HARD
-rlimit_stack_type: HARD
-
-""")
+    for key, val in config_settings:
+        tmpfile.write(f"{key}: {val}\n")
 
     for mnt in mounts:
         if mnt.src is None and mnt.fstype is None:
@@ -144,8 +161,30 @@ rlimit_stack_type: HARD
         tmpfile.write('}\n')
 
     tmpfile.flush()
-    nsjail_cmdline = [nsjail, "-Mo", "-q", "--config", tmpfile.name, "--"]
-    nsjail_cmdline.extend(["/usr/bin/quilt"] + sys.argv[1:])
+
+    nsjail_opts = ["-Mo"]
+    nsjail_target = []
+
+    if not VERBOSE:
+        nsjail_opts.append("-q")
+
+    if ENTER_SHELL:
+        print("Entering debug shell in target environment")
+        nsjail_target = ["/bin/bash", "-i"]
+    else:
+        nsjail_target = ["/usr/bin/quilt"] + sys.argv[1:]
+
+    nsjail_opts.extend(["--config", tmpfile.name, "--"])
+    nsjail_cmdline = [nsjail] + nsjail_opts + nsjail_target
+
+    if VERBOSE:
+        print(' '.join(nsjail_cmdline))
+    if DEBUG:
+        with open(tmpfile.name, 'r') as cfgfd:
+            print('configuration file content:')
+            print('-' * 80)
+            print(cfgfd.read())
+            print('-' * 80)
     res = subprocess.call(nsjail_cmdline, shell=False)
 
 sys.exit(res)
