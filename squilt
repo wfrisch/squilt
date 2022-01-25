@@ -64,6 +64,7 @@ mounts = [
     MountSpec(dst="/tmp", fstype="tmpfs", rw=True),
     MountSpec(dst="/var/tmp", fstype="tmpfs", rw=True),
     MountSpec(dst="/var/tmp", fstype="tmpfs", rw=True),
+    MountSpec(src="/var/lib/rpm"),
     MountSpec(src=pkgroot, rw=True),
     MountSpec(dst=os.path.expanduser("~/rpmbuild"), fstype="tmpfs", rw=True),
 ]
