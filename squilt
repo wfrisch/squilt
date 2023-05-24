@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -60,6 +61,7 @@ mounts = [
     MountSpec(src="/sbin"),
     MountSpec(src="/etc/alternatives", mandatory=False),
     MountSpec(src="/etc/nsswitch.conf"),
+    MountSpec(src="/etc/resolv.conf"),
     MountSpec(src="/etc/ld.so.cache"),
     MountSpec(src="/etc/rpm", mandatory=False),
     MountSpec(dst="/tmp", fstype="tmpfs", rw=True),
@@ -105,6 +107,7 @@ for extra in extra_mounts.split(";"):
 
 config_settings = [
     ("name", '"quilt secure sandbox"'),
+    ("hostname", f'"{socket.gethostname()}"'),
     ("description", '"This policy allows to run quilt in a secure way"'),
     ("cwd", f'"{os.getcwd()}"'),
     ("envar", f'"HOME={os.environ["HOME"]}"'),
