@@ -60,7 +60,6 @@ mounts = [
     MountSpec(src="/usr"),
     MountSpec(src="/sbin"),
     MountSpec(src="/etc/alternatives", mandatory=False),
-    MountSpec(src="/etc/nsswitch.conf"),
     MountSpec(src="/etc/resolv.conf"),
     MountSpec(src="/etc/ld.so.cache"),
     MountSpec(src="/etc/rpm", mandatory=False),
@@ -71,6 +70,14 @@ mounts = [
     MountSpec(src=pkgroot, rw=True),
     MountSpec(dst=os.path.expanduser("~/rpmbuild"), fstype="tmpfs", rw=True),
 ]
+
+# Autodetect nsswitch.conf
+if os.path.isfile("/etc/nsswitch.conf"):
+    mounts.append(MountSpec(src="/etc/nsswitch.conf"))
+elif os.path.isfile("/usr/etc/nsswitch.conf"):
+    mounts.append(MountSpec(src="/usr/etc/nsswitch.conf"))
+else:
+    eprint(f"nsswitch.conf not found (tried /etc and /usr/etc)", exit=2)
 
 for config in QUILT_CONFIGS:
     if not Path(config).exists():
