@@ -53,6 +53,18 @@ pkgroot = Path(os.getcwd())
 if (pkgroot / "patches").is_symlink():
     pkgroot = pkgroot.parent
 
+# Out-of-tree operations require an extra mount. We could just mount the
+# sourcedir automatically, but then subsequent operations like `quilt push`
+# would still fail. Let's inform the user instead.
+if "--sourcedir" in sys.argv:
+    sourcedir = Path(sys.argv[sys.argv.index("--sourcedir") + 1]).resolve()
+    is_below_pkgroot = pkgroot.resolve() in sourcedir.parents \
+        or pkgroot == sourcedir
+    if not (is_below_pkgroot or "SQUILT_EXTRA_MOUNTS" in os.environ):
+        eprint("Out-of-tree operations require an extra mount. For example:\n"
+               f"""export SQUILT_EXTRA_MOUNTS='MountSpec(src="{sourcedir}")'""",
+               exit=1)
+
 mounts = [
     MountSpec(src="/bin"),
     MountSpec(src="/lib"),
